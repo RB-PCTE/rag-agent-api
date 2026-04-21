@@ -20,14 +20,44 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="RAG Agent API", version="1.0.0")
+app = FastAPI(title="RAG Agent API", version="1.1.0")
 
 
+# ---------------------------
+# Request model
+# ---------------------------
 class AskRequest(BaseModel):
     question: str
     show_sources: bool = False
 
 
+# ---------------------------
+# Controlled abbreviation expansion
+# (ONLY used for retrieval)
+# ---------------------------
+def expand_query(question: str) -> str:
+    q = question
+
+    replacements = {
+        "GPR": "GPR (Ground Penetrating Radar)",
+        "NDT": "NDT (Non-Destructive Testing)",
+        "CNDT": "Construction Non-Destructive Testing",
+        "UPV": "UPV (Ultrasonic Pulse Velocity)",
+        "UPE": "UPE (Ultrasonic Pulse Echo)",
+        "IE": "Impact-Echo",
+        "MCGPR": "Multi-Channel Ground Penetrating Radar",
+    }
+
+    for short, expanded in replacements.items():
+        if short in q:
+            q = q.replace(short, expanded)
+
+    return q
+
+
+# ---------------------------
+# Embedding
+# ---------------------------
 def get_query_embedding(question: str):
     response = client.embeddings.create(
         model="text-embedding-3-small",
@@ -36,8 +66,12 @@ def get_query_embedding(question: str):
     return response.data[0].embedding
 
 
-def retrieve_chunks(question: str, match_count: int = 5):
-    query_embedding = get_query_embedding(question)
+# ---------------------------
+# Retrieval from Supabase
+# ---------------------------
+def retrieve_chunks(question: str, match_count: int = 8):
+    expanded_question = expand_query(question)
+    query_embedding = get_query_embedding(expanded_question)
 
     rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/match_document_chunks"
 
@@ -66,43 +100,49 @@ def retrieve_chunks(question: str, match_count: int = 5):
     return response.json()
 
 
+# ---------------------------
+# Build context
+# ---------------------------
 def build_context(chunks):
     parts = []
 
     for i, row in enumerate(chunks, start=1):
         parts.append(
             f"[Source {i}]\n"
-            f"document_id: {row['document_id']}\n"
-            f"similarity: {row['similarity']}\n"
             f"text:\n{row['text_content']}\n"
         )
 
     return "\n\n".join(parts)
 
 
+# ---------------------------
+# Answer generation (STRICT)
+# ---------------------------
 def answer_question(question: str, chunks):
     if not chunks:
-        return "I could not find relevant information in the knowledge base."
+        return "I don’t know based on the retrieved documents."
 
     context = build_context(chunks)
 
-system_prompt = (
-    "You are a strict retrieval-grounded assistant. "
-    "Answer only from the provided sources. "
-    "Do not use outside knowledge. "
-    "Do not provide alternate meanings, background context, or broader explanations "
-    "unless they are explicitly supported by the sources. "
-    "If the answer is not supported by the sources, say exactly: "
-    "'I don’t know based on the retrieved documents.'"
-)
+    system_prompt = (
+        "You are a strict retrieval-grounded assistant.\n\n"
+        "Rules:\n"
+        "- Answer ONLY using the provided sources\n"
+        "- You MAY combine multiple sources if they support the answer\n"
+        "- DO NOT use outside knowledge\n"
+        "- DO NOT provide alternative meanings or general explanations\n"
+        "- DO NOT expand abbreviations unless they appear in the sources\n"
+        "- If the answer is not clearly supported, say exactly:\n"
+        "  'I don’t know based on the retrieved documents.'\n"
+    )
 
     user_prompt = f"""Question:
 {question}
 
-Retrieved sources:
+Sources:
 {context}
 
-Write a grounded answer using only the retrieved sources.
+Answer using ONLY the sources.
 """
 
     response = client.responses.create(
@@ -116,14 +156,12 @@ Write a grounded answer using only the retrieved sources.
     return response.output_text.strip()
 
 
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
+# ---------------------------
+# API endpoint
+# ---------------------------
 @app.post("/ask")
 def ask(request: AskRequest):
-    chunks = retrieve_chunks(request.question, match_count=5)
+    chunks = retrieve_chunks(request.question, match_count=8)
     answer = answer_question(request.question, chunks)
 
     result = {
