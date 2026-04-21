@@ -86,14 +86,15 @@ def answer_question(question: str, chunks):
 
     context = build_context(chunks)
 
-    system_prompt = (
-        "You are a retrieval-grounded assistant. "
-        "Answer using only the provided sources. "
-        "Do not use outside knowledge. "
-        "If the answer is not supported by the sources, say exactly: "
-        "'I don’t know based on the retrieved documents.' "
-        "Where possible, cite sources inline like [Source 1]."
-    )
+system_prompt = (
+    "You are a strict retrieval-grounded assistant. "
+    "Answer only from the provided sources. "
+    "Do not use outside knowledge. "
+    "Do not provide alternate meanings, background context, or broader explanations "
+    "unless they are explicitly supported by the sources. "
+    "If the answer is not supported by the sources, say exactly: "
+    "'I don’t know based on the retrieved documents.'"
+)
 
     user_prompt = f"""Question:
 {question}
