@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: RAG Agent API
-  version: 1.0.0
-  description: API for querying a Supabase-backed RAG knowledge base.
+  version: 1.2.0
+  description: API for querying a Supabase-backed RAG knowledge base with text and optional images.
+
 servers:
-  - url: https://YOUR-DEPLOYED-DOMAIN.com
+  - url: https://YOUR-REAL-RENDER-URL.onrender.com
+
 paths:
   /health:
     get:
@@ -20,6 +22,7 @@ paths:
                 properties:
                   ok:
                     type: boolean
+
   /ask:
     post:
       operationId: askQuestion
@@ -37,6 +40,10 @@ paths:
                 show_sources:
                   type: boolean
                   description: Whether to include retrieved chunks
+                  default: false
+                show_images:
+                  type: boolean
+                  description: Whether to include related document images
                   default: false
               required:
                 - question
@@ -63,3 +70,23 @@ paths:
                           type: string
                         similarity:
                           type: number
+                  images:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document_id:
+                          type: string
+                        filename:
+                          type: string
+                        public_url:
+                          type: string
+                        page_number:
+                          type: integer
+                          nullable: true
+                        ocr_text:
+                          type: string
+                          nullable: true
+                        vision_description:
+                          type: string
+                          nullable: true
