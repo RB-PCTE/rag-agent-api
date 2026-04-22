@@ -28,8 +28,8 @@ app = FastAPI(title="RAG Agent API", version="1.2.0")
 # ---------------------------
 class AskRequest(BaseModel):
     question: str
-    show_sources: bool = False
-    show_images: bool = False
+    show_sources: Optional[bool] = True
+    show_images: Optional[bool] = True
 
 
 # ---------------------------
