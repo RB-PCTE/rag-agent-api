@@ -20,7 +20,7 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="RAG Agent API", version="1.1.0")
+app = FastAPI(title="RAG Agent API", version="1.2.0")
 
 
 # ---------------------------
@@ -29,6 +29,7 @@ app = FastAPI(title="RAG Agent API", version="1.1.0")
 class AskRequest(BaseModel):
     question: str
     show_sources: bool = False
+    show_images: bool = False
 
 
 # ---------------------------
@@ -56,6 +57,19 @@ def expand_query(question: str) -> str:
 
 
 # ---------------------------
+# Common Supabase headers
+# ---------------------------
+def supabase_headers() -> dict:
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Accept-Profile": "agents",
+        "Content-Profile": "agents",
+    }
+
+
+# ---------------------------
 # Embedding
 # ---------------------------
 def get_query_embedding(question: str):
@@ -75,13 +89,6 @@ def retrieve_chunks(question: str, match_count: int = 8):
 
     rpc_url = f"{SUPABASE_URL}/rest/v1/rpc/match_document_chunks"
 
-    headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "Content-Type": "application/json",
-        "Content-Profile": "agents",
-    }
-
     payload = {
         "query_embedding": query_embedding,
         "match_count": match_count
@@ -89,13 +96,47 @@ def retrieve_chunks(question: str, match_count: int = 8):
 
     response = requests.post(
         rpc_url,
-        headers=headers,
+        headers=supabase_headers(),
         json=payload,
         timeout=60
     )
 
     if response.status_code != 200:
         raise RuntimeError(f"Retrieval failed: {response.status_code} {response.text}")
+
+    return response.json()
+
+
+# ---------------------------
+# Image retrieval
+# ---------------------------
+def get_images_for_documents(document_ids, limit: int = 6):
+    if not document_ids:
+        return []
+
+    cleaned_ids = [doc_id for doc_id in document_ids if doc_id]
+    if not cleaned_ids:
+        return []
+
+    ids_csv = ",".join(cleaned_ids)
+
+    url = f"{SUPABASE_URL}/rest/v1/document_images"
+    params = {
+        "select": "document_id,filename,public_url,page_number,ocr_text,vision_description",
+        "document_id": f"in.({ids_csv})",
+        "limit": str(limit),
+        "order": "page_number.asc",
+    }
+
+    response = requests.get(
+        url,
+        headers=supabase_headers(),
+        params=params,
+        timeout=60,
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Image retrieval failed: {response.status_code} {response.text}")
 
     return response.json()
 
@@ -170,5 +211,13 @@ def ask(request: AskRequest):
 
     if request.show_sources:
         result["sources"] = chunks
+
+    if request.show_images:
+        document_ids = list({
+            row.get("document_id")
+            for row in chunks
+            if row.get("document_id")
+        })
+        result["images"] = get_images_for_documents(document_ids)
 
     return result
